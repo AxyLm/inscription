@@ -49,22 +49,36 @@ type ChainKey = keyof typeof chains;
 const example =
   'data:,{"p":"asc-20","op":"mint","tick":"aval","amt":"100000000"}';
 
+type Log = SuccessLog | ErrorLog;
+interface SuccessLog {
+  state: string;
+  time: Date;
+  hash: Hex;
+  owner: Hex;
+  to: Hex;
+}
+interface ErrorLog {
+  log: string;
+  state: string;
+  time: Date;
+}
+
+function isSuccessLog(log: Log): log is SuccessLog {
+  return log.state === "success";
+}
+function isErrorLog(log: Log): log is ErrorLog {
+  return log.state === "error";
+}
 export default function Home() {
-  const [accounts, setAccounts] = useState<(PrivateKeyAccount|HDAccount)[]>([]);
+  const [accounts, setAccounts] = useState<(PrivateKeyAccount | HDAccount)[]>([]);
   const [toAddress, setToAddress] = useState<Hex>();
   const [inscription, setInscription] = useState<string>("");
-  const [logs, setLogs] = useState<string[]>([]);
+  const [logs, setLogs] = useState<Log[]>([]);
   const [running, setRunning] = useState<boolean>(false);
   const [timer, setTimer] = useState<NodeJS.Timeout>();
   const [rpc, setRpc] = useState<string>();
   const [intervalTime, setIntervalTime] = useState<number>(1000);
   const [chain, setChain] = useState<Chain>(mainnet);
-
-  const handleLog = (log: string, state: string = "success") => {
-    return `${new Date().toLocaleString()} ${
-      state === "success" ? "✅" : state === "error" ? "❌" : ""
-    } => ${log}`;
-  };
 
   const handleAddress = (address: Hex) => {
     const prefix = address.slice(0, 6);
@@ -74,13 +88,21 @@ export default function Home() {
 
   const run = useCallback(() => {
     if (accounts.length === 0) {
-      setLogs((logs) => [handleLog("没有私钥", "error"), ...logs]);
+      setLogs((logs) => [{
+        state: 'error',
+        log: '没有私钥',
+        time: new Date(),
+      }, ...logs]);
       setRunning(false);
       return;
     }
 
     if (!inscription) {
-      setLogs((logs) => [handleLog("没有铭文", "error"), ...logs]);
+      setLogs((logs) => [{
+        state: 'error',
+        log: '没有铭文',
+        time: new Date(),
+      }, ...logs]);
       setRunning(false);
       return;
     }
@@ -101,13 +123,23 @@ export default function Home() {
             data: stringToHex(inscription),
           });
           setLogs((logs) => [
-            handleLog(`${handleAddress(account.address)} ${hash}`, "success"),
+            {
+              state: "success",
+              time: new Date(),
+              hash,
+              owner: (account.address),
+              to: toAddress ?? account.address,
+            },
             ...logs,
           ]);
         } catch (error) {
           console.error(error);
           setLogs((logs) => [
-            handleLog(`${handleAddress(account.address)} error`, "error"),
+            {
+              state: "error",
+              log: `${handleAddress(account.address)} ${error}`,
+              time: new Date(),
+            },
             ...logs,
           ]);
         }
@@ -121,7 +153,6 @@ export default function Home() {
       <h1 className=" text-5xl">Inscription</h1>
 
       <div className=" flex items-center justify-center gap-5">
-        <span>链（选你要打铭文的链，别选错了）:</span>
         <select
           className=" h-10 w-[200px] rounded-lg border px-2"
           disabled={running}
@@ -131,7 +162,7 @@ export default function Home() {
           }}
           title="Select Chain"
         >
-          {Object.keys(chains ).map((key) => (
+          {Object.keys(chains).map((key) => (
             <option
               key={key}
               value={key}
@@ -143,35 +174,32 @@ export default function Home() {
       </div>
 
       <div className=" flex flex-col gap-2">
-        <span>私钥/助记词（必填，每行一个）:</span>
+        <span>私钥/助记词(每行一个):</span>
         <textarea
           className="h-[100px] w-[800px] rounded-lg border p-2"
-          placeholder="私钥，不要带 0x，程序会自动处理"
+          placeholder="私钥/助记词"
           disabled={running}
           onChange={(e) => {
             const text = e.target.value;
             const lines = text.split("\n");
-            console.log(lines);
             const accounts = lines.map((line) => {
-              console.log(line);
               try {
                 if (/^0x[a-fA-F0-9]{64}$/.test(line)) {
                   return privateKeyToAccount(line as Hex);
-                }else {
+                } else {
                   return mnemonicToAccount(line);
                 }
               } catch (error) {
                 return undefined
               }
             });
-            setAccounts(accounts.filter((x) => x) as (PrivateKeyAccount|HDAccount)[] );
-            console.log(accounts);
+            setAccounts(accounts.filter((x) => x) as (PrivateKeyAccount | HDAccount)[]);
           }}
         />
       </div>
 
       <div className=" flex flex-col gap-2">
-        <span>to: </span>
+        <span>to:</span>
         <input
           className=" h-10 w-[800px] rounded-lg border px-2"
           placeholder="地址"
@@ -240,17 +268,33 @@ export default function Home() {
         />
       </div>
 
-      <div className=" mt-5 flex w-[1000px] flex-col gap-2">
-        <span>{`日志（计数 = ${
-          logs.filter((log) => log.includes("✅")).length
-        }）:`}</span>
+      <div className="mt-5 flex w-[1000px] flex-col gap-2">
+        <span>
+          {`hash count: ${logs.filter((log) => log.state === 'success').length}`}
+        </span>
+        <p>
+        </p>
         <div className=" flex h-[600px] flex-col gap-1 overflow-auto rounded-lg bg-gray-100 px-4 py-2">
-          {logs.map((log, index) => (
+          {logs.filter((_, i) => i <= 200).map((log, index) => (
             <div
-              key={log + index}
+              key={log.time.toString() + index}
               className=" flex items-center"
             >
-              {log}
+              <span className=" mr-2">
+                {log.time.toLocaleTimeString()}
+              </span>
+              {isSuccessLog(log) && (
+                <>
+                  <Link className=" text-blue-500 hover:underline mr-2" href={chain.blockExplorers?.default.url + '/address/' + log.owner} target="_blank">{handleAddress(log.owner)}</Link>
+                  <Link className=" text-blue-500 hover:underline mr-2" href={chain.blockExplorers?.default.url + '/address/' + log.to} target="_blank">{handleAddress(log.to)}</Link>
+                  <Link className=" text-blue-500 hover:underline" href={chain.blockExplorers?.default.url + '/tx/' + log.hash} target="_blank">{chain.name } {log.hash}</Link>
+                </>
+              )}
+              {
+                isErrorLog(log) && (
+                  <span className=" text-red-500 mr-2">{log.log}</span>
+                )
+              }
             </div>
           ))}
         </div>
