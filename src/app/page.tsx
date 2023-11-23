@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useCallback, useState } from "react";
 import {
   Chain,
+  HDAccount,
   Hex,
   PrivateKeyAccount,
   createWalletClient,
@@ -12,7 +13,7 @@ import {
   isAddress,
   stringToHex,
 } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
+import { privateKeyToAccount, mnemonicToAccount } from "viem/accounts";
 import {
   avalanche,
   bsc,
@@ -49,7 +50,7 @@ const example =
   'data:,{"p":"asc-20","op":"mint","tick":"aval","amt":"100000000"}';
 
 export default function Home() {
-  const [accounts, setAccounts] = useState<PrivateKeyAccount[]>([]);
+  const [accounts, setAccounts] = useState<(PrivateKeyAccount|HDAccount)[]>([]);
   const [toAddress, setToAddress] = useState<Hex>();
   const [inscription, setInscription] = useState<string>("");
   const [logs, setLogs] = useState<string[]>([]);
@@ -78,12 +79,6 @@ export default function Home() {
       return;
     }
 
-    if (!toAddress) {
-      setLogs((logs) => [handleLog("没有地址", "error"), ...logs]);
-      setRunning(false);
-      return;
-    }
-
     if (!inscription) {
       setLogs((logs) => [handleLog("没有铭文", "error"), ...logs]);
       setRunning(false);
@@ -98,9 +93,10 @@ export default function Home() {
     const timer = setInterval(async () => {
       for (const account of accounts) {
         try {
+          const baseUrl = chain.blockExplorers?.default.url;
           const hash = await client.sendTransaction({
             account,
-            to: toAddress,
+            to: toAddress ?? account.address,
             value: 0n,
             data: stringToHex(inscription),
           });
@@ -109,6 +105,7 @@ export default function Home() {
             ...logs,
           ]);
         } catch (error) {
+          console.error(error);
           setLogs((logs) => [
             handleLog(`${handleAddress(account.address)} error`, "error"),
             ...logs,
@@ -123,35 +120,6 @@ export default function Home() {
     <main className=" flex flex-col items-center gap-5 py-5">
       <h1 className=" text-5xl">Inscription</h1>
 
-      <div className=" flex items-center gap-2">
-        <span>代码开源:</span>
-        <Link
-          className=" text-blue-500 hover:underline"
-          href="https://github.com/vectorisvector/inscription"
-          target="_blank"
-        >
-          Alpha Script
-        </Link>
-
-        <span>dev:</span>
-        <Link
-          className=" text-blue-500 hover:underline"
-          href="https://twitter.com/cybervector_"
-          target="_blank"
-        >
-          @cybervector_
-        </Link>
-
-        <span>alpha:</span>
-        <Link
-          className=" text-blue-500 hover:underline"
-          href="https://twitter.com/ChaunceyCrypto"
-          target="_blank"
-        >
-          @ChaunceyCrypto
-        </Link>
-      </div>
-
       <div className=" flex items-center justify-center gap-5">
         <span>链（选你要打铭文的链，别选错了）:</span>
         <select
@@ -161,40 +129,49 @@ export default function Home() {
             const text = e.target.value as ChainKey;
             setChain(chains[text]);
           }}
+          title="Select Chain"
         >
-          {Object.keys(chains).map((key) => (
+          {Object.keys(chains ).map((key) => (
             <option
               key={key}
               value={key}
             >
-              {key}
+              {chains[key as ChainKey].name}
             </option>
           ))}
         </select>
       </div>
 
       <div className=" flex flex-col gap-2">
-        <span>私钥（必填，每行一个）:</span>
+        <span>私钥/助记词（必填，每行一个）:</span>
         <textarea
-          className=" h-[100px] w-[800px] rounded-lg border p-2"
+          className="h-[100px] w-[800px] rounded-lg border p-2"
           placeholder="私钥，不要带 0x，程序会自动处理"
           disabled={running}
           onChange={(e) => {
             const text = e.target.value;
             const lines = text.split("\n");
+            console.log(lines);
             const accounts = lines.map((line) => {
-              const key = "0x" + line.trim();
-              if (/^0x[a-fA-F0-9]{64}$/.test(key)) {
-                return privateKeyToAccount(key as Hex);
+              console.log(line);
+              try {
+                if (/^0x[a-fA-F0-9]{64}$/.test(line)) {
+                  return privateKeyToAccount(line as Hex);
+                }else {
+                  return mnemonicToAccount(line);
+                }
+              } catch (error) {
+                return undefined
               }
             });
-            setAccounts(accounts.filter((x) => x) as PrivateKeyAccount[]);
+            setAccounts(accounts.filter((x) => x) as (PrivateKeyAccount|HDAccount)[] );
+            console.log(accounts);
           }}
         />
       </div>
 
       <div className=" flex flex-col gap-2">
-        <span>转给谁的地址（必填）:</span>
+        <span>to: </span>
         <input
           className=" h-10 w-[800px] rounded-lg border px-2"
           placeholder="地址"
@@ -207,7 +184,7 @@ export default function Home() {
       </div>
 
       <div className=" flex flex-col gap-2">
-        <span>rpc（可选，默认公共，http，最好用自己的）:</span>
+        <span>rpc:</span>
         <input
           className=" h-10 w-[800px] rounded-lg border px-2"
           placeholder="rpc"
@@ -271,7 +248,7 @@ export default function Home() {
           {logs.map((log, index) => (
             <div
               key={log + index}
-              className=" flex h-8 items-center"
+              className=" flex items-center"
             >
               {log}
             </div>
